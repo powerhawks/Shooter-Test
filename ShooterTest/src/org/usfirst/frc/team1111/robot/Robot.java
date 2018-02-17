@@ -31,30 +31,36 @@ import edu.wpi.first.wpilibj.Joystick;
  *
  */
 public class Robot extends IterativeRobot {
-	Joystick joy = new Joystick(0);
+	Joystick joyDrive = new Joystick(0);
+	Joystick joyOp = new Joystick(1);
 	
 	DigitalInput boxSensor = new DigitalInput(0);
 	
-	TalonSRX shooterFrontLeft = new TalonSRX(1111); //TODO: Configure
-	TalonSRX shooterFrontRight = new TalonSRX(1111); //TODO: Configure
-	TalonSRX shooterBackLeft = new TalonSRX(1111); //TODO: Configure
-	TalonSRX shooterBackRight = new TalonSRX(1111); //TODO: Configure
-	TalonSRX intakeLeft = new TalonSRX(1111); //TODO: Configure
-	TalonSRX intakeRight = new TalonSRX(1111); //TODO: Configure
+	TalonSRX driveFrontLeft = new TalonSRX(46);
+	TalonSRX driveFrontRight = new TalonSRX(55);
+	TalonSRX driveBackLeft = new TalonSRX(47);
+	TalonSRX driveBackRight = new TalonSRX(39);
+	
+	TalonSRX shooterFrontLeft = new TalonSRX(59); //TODO: Configure
+	TalonSRX shooterFrontRight = new TalonSRX(49); //TODO: Configure
+	TalonSRX shooterBackLeft = new TalonSRX(41); //TODO: Configure
+	TalonSRX shooterBackRight = new TalonSRX(44); //TODO: Configure
+	TalonSRX intakeLeft = new TalonSRX(60); //TODO: Configure
+	TalonSRX intakeRight = new TalonSRX(50); //TODO: Configure
 	final int TIMEOUT_DELAY = 200; //ms
 	
 	double scaleSpeed;
-	int scaleVelocity = 60000; //TODO: Verify that is speed at 46% power and configure
+	int scaleVelocity = 32000; //TODO: Verify that is speed at 46% power and configure
 	double scalePercent = .46; //TODO: Verify and configure
 	
 	double switchSpeed;
 	int switchVelocity = 1111; //TODO: configure
 	double switchPercent = .5; //TODO: Verify and configure
 	
-	final double INTAKE_SPEED = 0.5; //TODO: Verify this is correct intake speed
+	double INTAKE_SPEED = 0.5; //TODO: Verify this is correct intake speed
 	boolean spunUp = false;
 	
-	DoubleSolenoid shooterPiston = new DoubleSolenoid(1111, 1111); //TODO: Configure
+	DoubleSolenoid shooterPiston = new DoubleSolenoid(4, 5); //TODO: Configure
 	boolean scale = false;
 	
 	double p = 0.0000175, i = 0.000001, d = 0; //Tuned PID values
@@ -71,6 +77,9 @@ public class Robot extends IterativeRobot {
 	String controlSelected = "";
 	boolean single;
 	
+	DoubleSolenoid soleShift = new DoubleSolenoid(0, 1);
+	boolean low = true;
+	
 	//=====BASIC METHODS=====
 	
 	@Override
@@ -84,12 +93,17 @@ public class Robot extends IterativeRobot {
 		
 		controlChooser.addDefault("Single", CHOOSE_SINGLE);
 		controlChooser.addObject("Dual", CHOOSE_DUAL);
-		SmartDashboard.putData(controlChooser);
+//		SmartDashboard.putData(controlChooser);
 		
 		SmartDashboard.putNumber("Scale Velocity:", scaleVelocity);
 		SmartDashboard.putNumber("Switch Velocity:", switchVelocity);
 		SmartDashboard.putNumber("Scale Percent:", scalePercent);
 		SmartDashboard.putNumber("Switch Percent:", switchPercent);
+		SmartDashboard.putNumber("Intake Speed:", INTAKE_SPEED);
+		
+		SmartDashboard.putNumber("P-Gain:", p);
+		SmartDashboard.putNumber("I-Gain:", i);
+		SmartDashboard.putNumber("D-Gain:", d);
 		
 		pid.setOutputLimits(-1, 1);
 	}
@@ -99,6 +113,10 @@ public class Robot extends IterativeRobot {
 		switchVelocity = (int) SmartDashboard.getNumber("Switch Velocity:", switchVelocity);
 		scalePercent = SmartDashboard.getNumber("Scale Percent:", scalePercent);
 		switchPercent = SmartDashboard.getNumber("Switch Percent:", switchPercent);
+		INTAKE_SPEED = SmartDashboard.getNumber("Intake Speed:", INTAKE_SPEED);
+		p = SmartDashboard.getNumber("P-Gain:", p);
+		i = SmartDashboard.getNumber("I-Gain:", i);
+		d = SmartDashboard.getNumber("D-Gain:", d);
 		
 		//Determines which system to use for speed - VELOCITY or PERCENTAGE
 		motorSelected = motorChooser.getSelected();
@@ -112,97 +130,42 @@ public class Robot extends IterativeRobot {
 			switchSpeed = switchPercent;
 			break;
 		}
-		
-		//Determines which system to use for control - SINGLE button or DUAL button
-		controlSelected = controlChooser.getSelected();
-		switch (controlSelected) {
-		case (CHOOSE_DUAL): 
-			single = false;
-			break;
-		default:
-			single = true;
-			break;
-		}
 	}
 
 	@Override
 	public void teleopPeriodic() {
-		boolean boxPos = boxSensor.get();
-
-		//===Intake logic===
-		if (joy.getRawButton(2) && !boxPos) { //Press A to INTAKE - Will not work when box is in position
-			setIntakes(INTAKE_SPEED);
-		}
-		else if (joy.getRawButton(3)) { //Press B to OUTTAKE
-			setIntakes(-INTAKE_SPEED);
-		}
-		else {
-			setIntakes(0);
-		}
+		operate();
+		drive(joyDrive.getRawAxis(1), joyDrive.getRawAxis(3));
 		
-		//===SINGLE BUTTON shooter logic===
-		if (boxPos && joy.getRawButton(5) && single) { //Press LB to shoot for SCALE
-			shoot(scaleSpeed);
+		if (joyDrive.getRawButton(6)) {
+			changeGear();
 		}
-		else if (boxPos && joy.getRawButton(6) && single) { //Press RB to shoot for SWTICH
-			shoot(switchSpeed);
-		}
-		else {
-			setShooters(0);
-		}
-		
-		//===DUAL BUTTON shooter logic===
-		if (boxPos && joy.getRawButton(5) && !single) { //Press LB to spin up for SCALE
-			spinUp(scaleSpeed);
-		}
-		else if (boxPos && joy.getRawButton(6) && !single) { //Press RB to spin up for SWTICH
-			spinUp(switchSpeed);
-		}
-		else {
-			setShooters(0);
-		}
-		if (spunUp && joy.getRawButton(8) && !single) { //Press RT to push box into shooter
-			setIntakes(1);
-		}
-		
-		//===Piston logic===
-		if (joy.getPOV() == 0) { //Press UP DPAD to raise shooter
-			changeAngle(1);
-		}
-		else if (joy.getPOV() == 90) { //Press DOWN DPAD to lower shooter
-			changeAngle(0);
-		}
-		
-		//===Debug section===
-		SmartDashboard.putNumber("Left Motor Speed:", shooterBackLeft.getSelectedSensorVelocity(0)); //Debug
-		SmartDashboard.putNumber("Right Motor Speed:", shooterBackRight.getSelectedSensorVelocity(0)); //Debug
-		SmartDashboard.putBoolean("Box in Place:", boxPos); //Debug
 	}
 
 	@Override
 	public void testPeriodic() {
-		if (joy.getRawButton(1)) {
+		if (joyOp.getRawButton(1)) {
 			shooterFrontLeft.set(ControlMode.PercentOutput, .25);
 		}
-		else if (joy.getRawButton(2)) {
-			shooterFrontRight.set(ControlMode.PercentOutput, .25);
+		else if (joyOp.getRawButton(2)) {
+			shooterFrontRight.set(ControlMode.PercentOutput, -.25);
 		}
-		else if (joy.getRawButton(3)) {
+		else if (joyOp.getRawButton(3)) {
 			shooterBackLeft.set(ControlMode.PercentOutput, .25);
 		}
-		else if (joy.getRawButton(4)) {
-			shooterBackRight.set(ControlMode.PercentOutput, .25);
+		else if (joyOp.getRawButton(4)) {
+			shooterBackRight.set(ControlMode.PercentOutput, -.25);
 		}
-		else if (joy.getRawButton(5)) {
+		else if (joyOp.getRawButton(5)) {
 			intakeLeft.set(ControlMode.PercentOutput, .25);
 		}
-		else if (joy.getRawButton(6)) {
-			intakeRight.set(ControlMode.PercentOutput, .25);
+		else if (joyOp.getRawButton(6)) {
+			intakeRight.set(ControlMode.PercentOutput, -.25);
 		}
-		else if (joy.getPOV() == 0) { //Press UP DPAD to raise shooter
+		else if (joyOp.getPOV() == 0) { //Press UP DPAD to raise shooter
 			changeAngle(1);
 		}
-		else if (joy.getPOV() == 90) { //Press DOWN DPAD to lower shooter
+		else if (joyOp.getPOV() == 180) { //Press DOWN DPAD to lower shooter
 			changeAngle(0);
 		}
 		else {
@@ -223,17 +186,13 @@ public class Robot extends IterativeRobot {
 	
 	private void spinUp(double target) {
 		double curSpeed;
-		
+//		setShooters(target);
 		//Checks and automatically switches to working encoder to get velocity data. Defaults to LEFT side
 		try {
 			curSpeed = shooterBackLeft.getSelectedSensorVelocity(0);
 		}
 		catch (Exception exception) {
 			curSpeed = shooterBackRight.getSelectedSensorVelocity(0);
-		}
-		finally {
-			curSpeed = 0;
-			System.out.println("=====FAILURE TO READ FROM ANY ENCODER=====");
 		}
 		
 		if (inRange(target, 0, 1)) { //Checks for motor percentage
@@ -252,14 +211,39 @@ public class Robot extends IterativeRobot {
 		SmartDashboard.putBoolean("Motors Spun Up:", spunUp); //Will always display for drive team - NOT A DEBUG
 	}
 	
-	//=====PISTON METHODS=====
+	//=====PNEUMATIC METHODS=====
 	
 	private void changeAngle(int state) {
 		if (state == 0) { //LOWERS piston
-			shooterPiston.set(Value.kReverse);
+			shooterPiston.set(Value.kForward); //TODO: Verify and configure
 		}
 		else if (state == 1) { //RAISES piston
-			shooterPiston.set(Value.kForward);
+			shooterPiston.set(Value.kReverse); //TODO: Verify and configure
+		}
+	}
+	
+	public void changeGear() {
+		low = !low;
+//		if (state == 0) {
+//			// Air to chamber C
+////			soleA.set(false);
+////			soleB.set(false);
+//		}
+//		else if (state == 1) {
+//			//Air to chamber A
+////			soleA.set(true);
+////			soleB.set(false);
+//		}
+//		else if (state == 2) {
+//			//Air to chamber B
+////			soleA.set(false);
+////			soleB.set(true);
+//		}
+		if (low) {
+			soleShift.set(Value.kForward);
+		}
+		else if (!low) {
+			soleShift.set(Value.kReverse);
 		}
 	}
 	
@@ -279,5 +263,58 @@ public class Robot extends IterativeRobot {
 	private void setIntakes(double speed) {
 		intakeLeft.set(ControlMode.PercentOutput, speed); //TODO: Verify and configure +/- speed
 		intakeRight.set(ControlMode.PercentOutput, -speed); //TODO: Verify and configure +/- speed
+	}
+	
+	//=====DRIVER/OPERATOR METHODS=====
+	
+	private void operate() {
+		boolean boxPos = boxSensor.get();
+
+		//===Intake logic===
+		if (joyOp.getRawButton(2) && !boxPos) { //Press A to INTAKE - Will not work when box is in position
+			setIntakes(INTAKE_SPEED);
+		}
+		else if (joyOp.getRawButton(3)) { //Press B to OUTTAKE
+			setIntakes(-INTAKE_SPEED);
+		}
+		else {
+			setIntakes(0);
+		}
+		
+		//===SINGLE BUTTON shooter logic===
+		if (boxPos && joyOp.getRawButton(5)) { //Press LB to shoot for SWITCH
+			shoot(switchSpeed);
+		}
+		else if (boxPos && joyOp.getRawButton(6)) { //Press RB to shoot for SCALE
+			shoot(scaleSpeed);
+		}
+		else {
+			setShooters(0);
+		}
+		
+		if (joyOp.getRawButton(8)) { //Press RT to push box into shooter
+			setIntakes(1);
+		}
+		
+		//===Piston logic===
+		if (joyOp.getPOV() == 0) { //Press UP DPAD to raise shooter
+			changeAngle(1);
+		}
+		else if (joyOp.getPOV() == 180) { //Press DOWN DPAD to lower shooter
+			changeAngle(0);
+		}
+		
+		//===Debug section===
+		SmartDashboard.putNumber("Left Motor Speed:", shooterBackLeft.getSelectedSensorVelocity(0)); //Debug
+		SmartDashboard.putNumber("Right Motor Speed:", shooterBackRight.getSelectedSensorVelocity(0)); //Debug
+		SmartDashboard.putBoolean("Box in Place:", boxPos); //Debug
+	}
+	
+	public void drive(double left, double right) {
+		left *= 1; right *= 1; //Soft limit
+		driveFrontLeft.set(ControlMode.PercentOutput, left);
+		driveBackLeft.set(ControlMode.PercentOutput, -left);
+		driveFrontRight.set(ControlMode.PercentOutput, right);
+		driveBackRight.set(ControlMode.PercentOutput, -right);
 	}
 }
